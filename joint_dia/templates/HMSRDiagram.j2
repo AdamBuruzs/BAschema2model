@@ -1,0 +1,100 @@
+ var namespace = joint.shapes;
+
+        document.getElementById('title').innerText = "{{title}}"
+
+        var graph = new joint.dia.Graph({}, { cellNamespace: namespace });
+
+        var paper = new joint.dia.Paper({
+            el: document.getElementById('paper'),
+            model: graph,
+            width: {{ 200* hydroNames| length}},
+            height: 800,
+            gridSize: 1,
+            cellViewNamespace: namespace
+        });
+
+        var rect = new joint.shapes.standard.Rectangle();
+        rect.position(100, 100);
+        rect.resize(70, 40);
+        rect.attr({
+            body: {
+                fill: 'blue'
+            },
+            label: {
+                text: 'Hello',
+                fill: '#AAAAAA'
+            }
+        });
+        // rect.addTo(graph);
+
+        var ellipse = new joint.shapes.standard.Ellipse();
+        ellipse.resize(100, 70);
+        ellipse.position(100, 100);
+        ellipse.attr('label/text', 'Ellipse');
+        ellipse.attr('body/fill', 'lightblue');
+
+
+    {% for hn in hydroNames %}
+        var hn{{loop.index0}} = ellipse.clone();
+        hn{{loop.index0}}.translate( {{100*loop.index0}}, 0); // position 100 pixels to left
+        hn{{loop.index0}}.attr('label/text', '{{hn}}' );
+        hn{{loop.index0}}.addTo(graph);
+    {% endfor %}
+
+    {% for tl in textLabels %}
+        var tl{{loop.index0}} = rect.clone();
+        tl{{loop.index0}}.resize(90, 120);
+        tl{{loop.index0}}.translate( {{100*loop.index0}}, 250); // position 100 pixels to left
+        tl{{loop.index0}}.attr('label/text', '{{tl}}' );
+        {%if tl | length > 60%} 
+            tl{{loop.index0}}.resize(120, 140);
+        {% endif %} 
+        tl{{loop.index0}}.addTo(graph);
+        /// add the links:
+        var link = new joint.shapes.standard.Link();
+        link.source(hn{{loop.index0}});
+        link.target(tl{{loop.index0}});
+        link.addTo(graph);
+    {% endfor %}
+
+    {% for bi in ctrlBlocks %}
+        var cbl{{ loop.index0 }} = rect.clone();
+        cbl{{loop.index0}}.translate( {{10+600*bi[0]}}, {{ 450+ 100*bi[1]}} ); // position 100 pixels to left
+        cbl{{loop.index0}}.attr('label/text', 'Cont_{{loop.index0}}: {{bi[2]}}' );
+        cbl{{loop.index0}}.attr('body/fill', '#11BB11');
+        cbl{{loop.index0}}.attr('label/fill', '#441155');
+        cbl{{loop.index0}}.resize(50,40);
+        cbl{{loop.index0}}.addTo(graph);
+    {% endfor %}
+
+    {% for ic in IBLcon %}
+        var link = new joint.shapes.standard.Link();
+        {%  if ic[2] == 'IN' %}
+            link.source(tl{{ic[0]}});
+            link.target(cbl{{ic[1]}});
+        {% else %} 
+            link.source(cbl{{ic[1]}});
+            link.target(tl{{ic[0]}});
+        {% endif%}
+        link.connector('rounded', { radius: 20 });
+        link.connector('smooth');
+        link.addTo(graph);
+    {% endfor %}
+
+
+    {% for cc in CCconnects %}
+        var link = new joint.shapes.standard.Link();
+        link.source(cbl{{cc[0]}});
+        link.target(cbl{{cc[1]}});
+        link.connector('rounded', { radius: 20 });
+        link.connector('smooth');
+        link.attr('line/stroke', '#AA2244');
+        link.addTo(graph);
+    {% endfor %}
+
+
+//
+//        var link = new joint.shapes.standard.Link();
+//        link.source(rect);
+//        link.target(rect2);
+//        link.addTo(graph);
