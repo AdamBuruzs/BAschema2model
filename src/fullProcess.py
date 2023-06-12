@@ -6,7 +6,6 @@ import logging, sys
 
 logging.basicConfig(stream = sys.stdout, level = logging.DEBUG)
 import fitz
-# import Elias_DigiAktive_V100822.Programm.lineReader as lineReader
 
 # from src import ALineReader as lineReader
 import numpy as np
@@ -17,9 +16,11 @@ from src import lineReader
 from src import hydraulicProcess
 from src import textlabels
 from src import lineConnects
+from src.readpdf import getSchemaNumber
 import json
 import jinja2
 import os
+
 
 class DataEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -97,6 +98,7 @@ def plotControls(ifaces, controls, page):
             filt_text = [ti for ti in texti if not (ti[0] in ["x", "y", "z"]) ]
             ax[0].text(tei[0][0]+2, Ym - tei[0][1]+ 2,
                    tei[4], style='italic', alpha=0.5, color="#BB8888")
+    lineConnects.plotLines(ax[0], controls["linesOfControl"], Ymax=Ym, col="#BB1111", alpha=0.3, annotate=False)
 
 def toText(ifaces, controls):
     """ convert data to text"""
@@ -104,7 +106,7 @@ def toText(ifaces, controls):
                          cls=DataEncoder)
     return outText
 
-def toJointDiagram(ifaces, controls, title = "", outfile = "./joint_dia/output/diagram.js"):
+def toJointDiagram(ifaces, controls, title = "", outfile = "../joint_dia/output/diagram.js"):
     """create jointjs diagram from the interfaces and control blocks"""
     environment = jinja2.Environment(loader=jinja2.FileSystemLoader("../joint_dia/templates/"))
     template = environment.get_template("HMSRDiagram.j2") ## jinja template
@@ -131,7 +133,9 @@ def toJointDiagram(ifaces, controls, title = "", outfile = "./joint_dia/output/d
                    for ci in range(len(controls["rectangles"]))]
     logging.info(f"js visualizing control blocks \n {ctrlBlocks}")
     conTmp = [ [(i,vv) for vv in v ] for i,v in  enumerate(controls['ctrl2ctrl']) if len(v) > 0 ]
-    CCconnects = [vl for sublist in conTmp for vl in sublist]
+    # CCconnects = [vl for sublist in conTmp for vl in sublist]
+    CCconnects = [(coni[0], coni[2]) for coni in controls['ctrl2ctrlConnections'] if
+                  (coni[1][0] == "y") or (coni[3][0] in ["x", "w"])]  # input label is only x.. or w..
     content = template.render(hydroNames = hydroNames, textLabels = textLabels,
                               ctrlBlocks = ctrlBlocks,
                               IBconnects = IBconnects,
@@ -191,15 +195,3 @@ if __name__ == "__main__":
             except:
                 logging.error(f"Error on page {pagenum }")
                 logging.error(sys.exc_info() )
-
-
-    # iface2ctrlLabel = lineConnects.terminalConnectionsLabelled(controls['interfaceTerminals'],
-    #                                                            controls['ctrlTerminals'],
-    #                                                            controls['connectDict'] )
-
-    ### TODO:
-    # extract schema number (Zeichungsnummer)
-    # exact label match
-
-    # open("results")
-

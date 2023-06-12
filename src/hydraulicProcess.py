@@ -42,12 +42,15 @@ def text2Points(page, pointsXY: np.array, ymin = None, ymax = None, Nret = 3  ):
 def hydraulicConnections(page, doplot = True, title = "page xy", precision= 3,
                          vhconTol = 15, minLegth = 15):
     """ process the hydraulic diagrams. It deals with vertical dashed lines, and
-    New: it also checks the connecting horizontel dashed lines that are connected to the vertical lines through a corner.
+    New: it also checks the connecting horizontal dashed lines that are connected to the vertical lines through a corner.
 
     :param vhconTol: tolerance of vertical-horizontal line connections
     :param minLegth: minimum length of the vertical dashed lines, otherwise the line is omitted
     :param precision: used for vertical/horizontal dashed line detection.´
     :param doplot: if true, a visualization of the detected components and keypoints are visualized. useful for debugging
+    :return: topPoints: the top endpoint of the big vertical lines. THe component might be here.
+    VerticalMatchpoint : the vertical line might continue in an elbow and end in an other point (vertical matchpoint),
+    which has the same y-level as the topPoint and might terminate in a component icon.
     """
 
     ## TODO: process rectangular corners, and vertical dashed lines, and build up connections with the vertical dashed lines
@@ -100,9 +103,11 @@ def hydraulicConnections(page, doplot = True, title = "page xy", precision= 3,
         lineConnects.plotLines(ax[0], dashedLongLines, Ymax=Ym, col="#2211BB", alpha=0.8, annotate=True)
     y_vals = [ max(li.startPoint[1], li.endPoint[1]) for li in  dashedV_lines ]
     max_y = np.quantile(y_vals,0.95) ## around the bottom of the hydraulic part
+    logging.info(f"lines from ")
     ## keep only vertical lines, which are touching the bottom of the hydraulic diagram:
+    toly = 10 ## tol pixels above the bottom line regarded as line reaching the bottom
     lines2Connect = [ li for li in dashedV_lines if
-                      ((max(li.startPoint[1], li.endPoint[1]) ) >= max_y) & (li.lineLength() > minLegth) ]
+                      ((max(li.startPoint[1], li.endPoint[1]) ) >= max_y-toly) & (li.lineLength() > minLegth) ]
     topPoints = np.array(
         [li.startPoint if (li.startPoint[1] < li.endPoint[1]) else li.endPoint for li in lines2Connect])
     HlinesCoords = np.array([li.startPoint + li.endPoint for li in dashedH_lines])
@@ -110,21 +115,25 @@ def hydraulicConnections(page, doplot = True, title = "page xy", precision= 3,
     ## TODO: make it nicer, a separate object with set of lines, following path (connections) and returning points
     matchVerticalLines = []
     verticalMatchPoints = []
-    for tp in topPoints:
-        distMat = HlinesCoords - np.tile(tp, 2)
-        mindist = np.min([np.linalg.norm(distMat[:, 0:2], axis=1), np.linalg.norm(distMat[:, 2:], axis=1)], axis=0)
-        vLineWithinTolerance = np.where(mindist < vhconTol)[0]
-        if vLineWithinTolerance.__len__() > 0:
-            ixclosest = vLineWithinTolerance[0]
-            matchVerticalLines.append(dashedH_lines[ixclosest])
-            distances = distMat[ixclosest, :]
-            if np.linalg.norm(distances[0:2]) < np.linalg.norm(distances[2:]):
-                verticalMatchPoints.append(HlinesCoords[ixclosest,  2:])
+    if HlinesCoords.__len__() == 0:
+        matchVerticalLines = [None]*(topPoints.__len__())
+        verticalMatchPoints = [None]*(topPoints.__len__())
+    else:
+        for tp in topPoints:
+            distMat = HlinesCoords - np.tile(tp, 2)
+            mindist = np.min([np.linalg.norm(distMat[:, 0:2], axis=1), np.linalg.norm(distMat[:, 2:], axis=1)], axis=0)
+            vLineWithinTolerance = np.where(mindist < vhconTol)[0]
+            if vLineWithinTolerance.__len__() > 0:
+                ixclosest = vLineWithinTolerance[0]
+                matchVerticalLines.append(dashedH_lines[ixclosest])
+                distances = distMat[ixclosest, :]
+                if np.linalg.norm(distances[0:2]) < np.linalg.norm(distances[2:]):
+                    verticalMatchPoints.append(HlinesCoords[ixclosest,  2:])
+                else:
+                    verticalMatchPoints.append(HlinesCoords[ixclosest, 0:2])
             else:
-                verticalMatchPoints.append(HlinesCoords[ixclosest, 0:2])
-        else:
-            matchVerticalLines.append(None)
-            verticalMatchPoints.append(None)
+                matchVerticalLines.append(None)
+                verticalMatchPoints.append(None)
     if doplot:
         lineConnects.plotLines(ax[0], lines2Connect, Ymax=Ym, col="#11BB11", alpha=0.8, annotate=True)
         ax[0].set_title(f"page : {title} Hydraulic schema {lines2Connect.__len__()} detected connectors")
@@ -133,8 +142,9 @@ def hydraulicConnections(page, doplot = True, title = "page xy", precision= 3,
         lineConnects.plotLines(ax[0], [mvl for mvl in matchVerticalLines if mvl is not None], Ymax=Ym, col="#11BBBB",
                                alpha=0.8, annotate=True)
         Vmatches = np.array([ vmp for vmp in verticalMatchPoints if vmp is not None ])
-        ax[0].scatter(Vmatches[:, 0], Ym - Vmatches[:, 1], s=7** 2, linewidths=3, marker="o", facecolors='none',
-                      edgecolor="#11CC99", alpha=0.6)
+        if Vmatches.__len__()>0:
+            ax[0].scatter(Vmatches[:, 0], Ym - Vmatches[:, 1], s=7** 2, linewidths=3, marker="o", facecolors='none',
+                          edgecolor="#11CC99", alpha=0.6)
         for tp in range(len(topPoints)):
             xmid, ymid = topPoints[tp]
             ax[0].text(xmid, Ym - ymid, f"TopPoint_{tp}", style='italic', alpha=0.7, color="#333399")
@@ -153,6 +163,7 @@ def hydraulicConnections(page, doplot = True, title = "page xy", precision= 3,
                "matchingVerticalLines": matchVerticalLines,
                "verticalMatchPoints":verticalMatchPoints, "labels2VertPoints" : labels2VertPoints,
                "mergedFirstLabels" : mergedFirstLabels}
+    ## convert the dict of lists to list of dicts
     out = [dict(zip(res_dict.keys(),t)) for t in  zip(* res_dict.values())]
     #outfilt = [hc for hc in out if hc['lines'].lineLength() > minLegth]
     return out

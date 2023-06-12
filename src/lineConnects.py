@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 
 matplotlib.use("Qt5Agg")
-import straightLines
+from src import straightLines
 from src import readpdf
 import cv2 as cv
 from time import time
@@ -235,7 +235,7 @@ def label2ControlTerminals(ctrlTerminals, page ):
     """ take the rectangle/control terminals, and find the closest text-boxes (labels) corresponding to the terminals
 
     :param ctrTerminals: control terminals, the "rectTerminals" output of controlTerminals function
-    ### :param textblocks:
+    :param page: fitz page
     :return: the controlterminals list with the label appended to each tuple
     """
     Y_before, Y_after, HSY = exportRegelStruktur.getSectionStrYLims(page, "egelstruktur", xmax=150)
@@ -321,26 +321,61 @@ def terminalConnectionsLabelled(ifaceTerminals, ctrlTerminals, connectDict):
 
 
 def ctrl2ctrlConnections( ctrlTerminals, connectDict):
-    """ match interface terminals (input variable points) with control terminals"""
+    """ find connections between control terminals
+    :param ctrlTerminals: control block terminal points
+    :param connectDict: dictionary with lines as keys, and indices of connected lines (graph of the line-connections)
+    """
     # ifaceConnections = []
     ctrl2ctrl = []
+    ## indices of lines connected to control blocks (one list per each ctrl block):
     linesOfBlocks = [ [ti[1] for ti in  cT] for cT in ctrlTerminals ]
     for fi, cB in enumerate(linesOfBlocks):
         logging.info(f"block {fi} connections are searched")
 
         ctrl2ctrl.append(np.array([]).astype(np.int64))
-        for cT in cB:
+        for cT in cB: # cycle over all lines connected to block fi
             lMatch = []
             ccls = findConnectedLines(connectDict, ix=cT, listMatches=lMatch)
             # ifaceConnections.append((ifT['terminalPoint'], lMatch))
             ## the connected Blocks
             lMatch.append(cT) ## add the line itself
+            ## list of connected blocks
             conBlocks = np.where([ set(lMatch).intersection(set(others)).__len__() for others in linesOfBlocks ])[0]
-            conBlocks = conBlocks [ conBlocks != fi]
+            conBlocks = conBlocks [ conBlocks != fi] # list of other block indices
             logging.info(f"block {fi} line {cT} connected to blocks {conBlocks} ")
             ctrl2ctrl[fi] = np.unique( np.concatenate((ctrl2ctrl[fi],conBlocks), axis = None))
-
     return ctrl2ctrl
+
+def ctrl2ctrlConnectionsLabelled( ctrlTerminals, connectDict):
+    """ find connections between control terminals, and also store the labels of the terminals, that are used to determine the
+    information flow direction
+
+    :param ctrlTerminals: control block terminal points
+    :param connectDict: dictionary with lines as keys, and indices of connected lines (graph of the line-connections)
+    """
+    # ifaceConnections = []
+    ctrl2ctrlL = []
+    ## indices of lines connected to control blocks (one list per each ctrl block):
+    linesOfBlocks = [ [ti[1] for ti in  cT] for cT in ctrlTerminals ]
+    for fi, cB in enumerate(ctrlTerminals): # cycle over control blocks
+        logging.info(f"block {fi} connections are searched")
+        ctrl2ctrlL.append([])
+        for cteri in cB: # cycle over all terminals of block fi
+            cT = cteri[1] # the line of the control terminal
+            termiLabel = cteri[4] # label of the terminal (x,y,w etc.)
+            lMatch = []
+            ccls = findConnectedLines(connectDict, ix=cT, listMatches=lMatch)
+            # ifaceConnections.append((ifT['terminalPoint'], lMatch))
+            ## the connected Blocks
+            lMatch.append(cT) ## add the line itself
+            ## list of connected blocks
+            conBlocks = np.where([ set(lMatch).intersection(set(others)).__len__() for others in linesOfBlocks ])[0]
+            conBlocks = conBlocks [ conBlocks != fi] # list of other block indices
+            logging.info(f"block {fi} line {cT} connected to blocks {conBlocks} ")
+            #ctrl2ctrlL[fi] = np.concatenate((ctrl2ctrlL[fi],(conBlocks, termiLabel) ), axis = None)
+            if conBlocks.__len__() > 0:
+                ctrl2ctrlL[fi] = ctrl2ctrlL[fi] + [(conBlocks, termiLabel)]
+    return ctrl2ctrlL
 
 
 def text2Rectangles_old(page, rectangles, maxdist=50):
@@ -426,9 +461,11 @@ def findMatchingLabel(textBlocks, xval, seplines=None):
 
 
 def findConnectedLines(connectDict, ix, listMatches=[]):
-    """ find elements that are connected with the one with index ix
+    """ find elements that are connected with the one with index ix. using a recursion.
+
     :param connectDict: a dictionary of line connections
     :param ix: array of indices. find the connections to the elements with these indices.
+    :return: returns nothing, but fills the listMatches argument with the lines connected to line ix
     """
     ixkey = f'l_{ix}'
     if not ixkey in connectDict:
@@ -515,21 +552,41 @@ def processControlDiagram(page, pixThreshold=200, zoom_factor=3, minRctglLen=30)
         iface2ctrl = terminalConnections( ifaceTerminals, ctrlTerminals, connectDict)
         ctrl2ctrl =  ctrl2ctrlConnections(ctrlTerminals, connectDict) ## connections between control blocks
         ctrlTerminals = label2ControlTerminals(ctrlTerminals, page)
+        ## after labelled the terminals, get the connections and labels for directions:
+        ctrl2ctrlLabelled = ctrl2ctrlConnectionsLabelled(ctrlTerminals,
+                                                         connectDict)  ## connections between control blocks
         iface2ctrlLabelled = terminalConnectionsLabelled(ifaceTerminals,
                                                                ctrlTerminals,
                                                                connectDict )
+        ctrl2ctrlCons = c2cConnections(ctrl2ctrlLabelled)
         logging.info(f"interface-control block connections: \n{iface2ctrl}")
         return {"rectangles": rectangles, "text2rectangles": textlabels, "ctrlTerminals": ctrlTerminals,
-                "interfaceTerminals": ifaceTerminals, "iface2ctrl_mapping": iface2ctrl, "iface2ctrl_labelled": iface2ctrlLabelled,
-                "connectDict": connectDict, "ctrl2ctrl": ctrl2ctrl }
+                "interfaceTerminals": ifaceTerminals, "linesOfControl" : linesControl,
+                "iface2ctrl_mapping": iface2ctrl, "iface2ctrl_labelled": iface2ctrlLabelled,
+                "connectDict": connectDict, "ctrl2ctrl": ctrl2ctrl, "ctrl2ctrlConnections" : ctrl2ctrlCons }
     else:
         logging.error("no rectangle found in the control diagram")
         return None
 
+def c2cConnections(ctrl2ctrlLabelled):
+    """ from list of outgoing connections it creates a list of inter-block connections
+    :param ctrl2ctrlLabelled: a list of lists obtained from terminalConnectionsLabelled.
+    :return: a list of 4 tuples (block-index1, terminal-label1, block-index2, terminal-label2)
+    """
+    connections = []
+    for i, ctrlcons_i in enumerate(ctrl2ctrlLabelled):
+        if len(ctrlcons_i) > 0:
+            print(f"connections from block {i}: {ctrlcons_i}")
+            for ik in ctrlcons_i: # ik[0] : other block indices, ik[1]: this label
+                for otherBlock in ik[0]: # otherBlock is the index of the other control block
+                    other_label = [ob[1] for ob in ctrl2ctrlLabelled[otherBlock] if ob[0].__contains__(i)][0]
+                    connections.append((i,ik[1],otherBlock,other_label))
+    return connections
+
 
 if __name__ == "__main__":
 
-    inpfile = "C:/Users/BuruzsA/Documents/projects/Digiaktiv/220621_Beispielschemen digiaktiv.pdf"
+    inpfile = "C:/Users/BuruzsA/Documents/projects/Digiaktiv/WSCAD_Examples/220621_Beispielschemen digiaktiv.pdf"
     doc = fitz.open(inpfile)  # Opens the document from a given path
     # pnr = 3        #Page number (page 1 has index 0)
     #for pnr in range(10, 18):

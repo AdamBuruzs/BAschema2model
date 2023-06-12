@@ -1,3 +1,6 @@
+import logging
+import sys
+
 import fitz # PyMuPDF
 import io
 from PIL import Image
@@ -89,6 +92,21 @@ def plotLinesOfPage(pdf_file, pagenum):
     linesWithLength = np.array(allines)[posLen]
     plotLines(linesWithLength, plotlabels=True)
     plt.title(f"page of pdf {pagenum+1}")
+
+def getSchemaNumber(page : fitz.fitz.Page):
+    """ get the diagram title, looks for the field next to the Zeichnungsnummer"""
+    try:
+        keylabel = np.array(page.search_for("Zeichnungsnummer"))[0] # coordinates of Zeichnungsummer
+        textBlocks = page.get_text("blocks")
+        rightToKeyBlock = [tb for tb in textBlocks if
+                      ((tb[1]+tb[3])/2 > keylabel[1]) & ((tb[1]+tb[3])/2 < keylabel[3]) & # y coordinate
+                      (tb[0] > keylabel[0]) ] # x  coordinate
+        Znumber = rightToKeyBlock[0][4]
+        return Znumber
+    except:
+        logging.error(f"{sys.exc_info()} . error in getSchemaNumber/ Zeichnungsummer not found")
+        return None
+
 
 if __name__ == "__main__":
     file = "C:/Users/BuruzsA/Documents/projects/Digiaktiv/220621_Beispielschemen digiaktiv.pdf"
